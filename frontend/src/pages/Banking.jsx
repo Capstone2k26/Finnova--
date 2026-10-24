@@ -13,8 +13,19 @@ const Banking = () => {
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   
   const queryClient = useQueryClient();
-  const { data: accountsData, refetch, isLoading: accountsLoading, isError: accountsError } = useQuery('accounts', bankingService.getAccounts);
-  const { data: transactionsData, refetch: refetchTransactions } = useQuery('transactions', bankingService.getTransactions);
+  const {
+    data: accountsData,
+    refetch,
+    isLoading: accountsLoading,
+    isError: accountsError,
+    error: accountsErrorDetails
+  } = useQuery('accounts', bankingService.getAccounts);
+  const {
+    data: transactionsData,
+    refetch: refetchTransactions,
+    isError: transactionsError,
+    error: transactionsErrorDetails
+  } = useQuery('transactions', bankingService.getTransactions);
   const { data: ledgerData, isLoading: ledgerLoading, isError: ledgerError } = useQuery(
     ['account-ledger', selectedAccountId],
     () => bankingService.getLedger(selectedAccountId),
@@ -60,6 +71,13 @@ const Banking = () => {
     } finally {
       setIsCreatingAccount(false);
     }
+  };
+
+  const getLoadErrorMessage = (error, resource) => {
+    if (error?.response?.status === 401) return 'Your sign-in has expired. Sign in again, then return here.';
+    if (error?.response?.status === 403) return `You do not have permission to view ${resource}.`;
+    if (error?.response) return `Could not load ${resource} (server returned ${error.response.status}). Try again.`;
+    return `Could not connect to the backend while loading ${resource}. Make sure it is running on port 5000.`;
   };
 
   const handleTransfer = async (e) => {
@@ -212,7 +230,15 @@ const Banking = () => {
             <h3 className="text-lg font-semibold">Practice Accounts</h3>
             <span className="text-sm text-gray-500">{accounts.length} total</span>
           </div>
-          {accountsError && <p role="alert" className="text-red-600 mb-3">Could not load accounts. Check the backend connection.</p>}
+          {accountsError && (
+            <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+              <p>{getLoadErrorMessage(accountsErrorDetails, 'accounts')}</p>
+              <div className="flex gap-3">
+                {accountsErrorDetails?.response?.status === 401 && <a href="/login" className="font-semibold underline">Sign in</a>}
+                <button type="button" onClick={() => refetch()} className="font-semibold underline">Retry</button>
+              </div>
+            </div>
+          )}
           <div className="space-y-3">
             {accounts.map((account) => (
               <div key={account.id} className={`p-4 rounded-lg border ${selectedAccountId === account.id ? 'border-indigo-400 bg-indigo-50' : 'border-gray-100 bg-gray-50'}`}>
@@ -280,6 +306,12 @@ const Banking = () => {
               <input id="transaction-search" className="px-3 py-2 border border-gray-300 rounded-lg text-sm min-w-0 w-36" placeholder="Search..." value={transactionSearch} onChange={(event) => setTransactionSearch(event.target.value)} />
             </div>
           </div>
+          {transactionsError && (
+            <p role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+              {getLoadErrorMessage(transactionsErrorDetails, 'transactions')}
+              <button type="button" onClick={() => refetchTransactions()} className="ml-2 font-semibold underline">Retry</button>
+            </p>
+          )}
           <div className="space-y-3 max-h-96 overflow-y-auto">
             {filteredTransactions.map((tx) => (
               <div key={tx.id} className="flex items-center justify-between py-3 border-b border-gray-100">

@@ -22,8 +22,10 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('finnova-auth');
-      window.location.href = '/login';
+      useAuthStore.getState().logout();
+      if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }
