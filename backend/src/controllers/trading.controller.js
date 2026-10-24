@@ -46,9 +46,17 @@ exports.getStockDetails = async (req, res) => {
 exports.placeOrder = async (req, res) => {
   try {
     const { stockId, orderType, quantity, accountId } = req.body;
+    const shares = Number(quantity);
+
+    if (!['buy', 'sell'].includes(orderType)) {
+      return res.status(400).json({ error: 'Order type must be buy or sell' });
+    }
+    if (!Number.isInteger(shares) || shares <= 0) {
+      return res.status(400).json({ error: 'Quantity must be a whole number greater than zero' });
+    }
 
     const stock = await Stock.findByPk(stockId);
-    if (!stock) {
+    if (!stock || !stock.isActive) {
       return res.status(404).json({ error: 'Stock not found' });
     }
 
@@ -60,7 +68,7 @@ exports.placeOrder = async (req, res) => {
       return res.status(404).json({ error: 'Account not found' });
     }
 
-    const totalAmount = parseFloat(stock.currentPrice) * quantity;
+    const totalAmount = Math.round(parseFloat(stock.currentPrice) * shares * 100) / 100;
 
     if (orderType === 'buy') {
       if (parseFloat(account.balance) < totalAmount) {
@@ -72,9 +80,9 @@ exports.placeOrder = async (req, res) => {
         fromAccountId: accountId,
         transactionType: 'stock_buy',
         amount: totalAmount,
-        description: `Buy ${quantity} shares of ${stock.symbol}`,
+        description: `Buy ${shares} shares of ${stock.symbol}`,
         status: 'completed',
-        metadata: { stockId, quantity, price: stock.currentPrice }
+        metadata: { stockId, quantity: shares, price: stock.currentPrice }
       });
 
       // Update account balance
@@ -84,14 +92,14 @@ exports.placeOrder = async (req, res) => {
       const [portfolio, created] = await Portfolio.findOrCreate({
         where: { userId: req.userId, stockId, assetType: 'stock' },
         defaults: {
-          quantity,
+          quantity: shares,
           averagePurchasePrice: stock.currentPrice,
           currentValue: totalAmount
         }
       });
 
       if (!created) {
-        const newQuantity = parseFloat(portfolio.quantity) + quantity;
+        const newQuantity = parseFloat(portfolio.quantity) + shares;
         const newAvgPrice = ((parseFloat(portfolio.averagePurchasePrice) * parseFloat(portfolio.quantity)) + totalAmount) / newQuantity;
         
         await portfolio.update({
@@ -111,7 +119,7 @@ exports.placeOrder = async (req, res) => {
         where: { userId: req.userId, stockId, assetType: 'stock' }
       });
 
-      if (!portfolio || parseFloat(portfolio.quantity) < quantity) {
+      if (!portfolio || parseFloat(portfolio.quantity) < shares) {
         return res.status(400).json({ error: 'Insufficient shares' });
       }
 
@@ -120,16 +128,16 @@ exports.placeOrder = async (req, res) => {
         toAccountId: accountId,
         transactionType: 'stock_sell',
         amount: totalAmount,
-        description: `Sell ${quantity} shares of ${stock.symbol}`,
+        description: `Sell ${shares} shares of ${stock.symbol}`,
         status: 'completed',
-        metadata: { stockId, quantity, price: stock.currentPrice }
+        metadata: { stockId, quantity: shares, price: stock.currentPrice }
       });
 
       // Update account balance
       await account.increment('balance', { by: totalAmount });
 
       // Update portfolio
-      const newQuantity = parseFloat(portfolio.quantity) - quantity;
+      const newQuantity = parseFloat(portfolio.quantity) - shares;
       if (newQuantity === 0) {
         await portfolio.destroy();
       } else {

@@ -1,4 +1,5 @@
 const { Op } = require('sequelize');
+const sequelize = require('../config/database');
 const Account = require('../models/Account');
 const Transaction = require('../models/Transaction');
 const { v4: uuidv4 } = require('uuid');
@@ -59,45 +60,65 @@ exports.getAccountBalance = async (req, res) => {
 exports.transferFunds = async (req, res) => {
   try {
     const { fromAccountId, toAccountId, amount, description } = req.body;
+    const transferAmount = Number(amount);
 
-    const fromAccount = await Account.findOne({
-      where: { id: fromAccountId, userId: req.userId }
+    if (!fromAccountId || !toAccountId || fromAccountId === toAccountId) {
+      return res.status(400).json({ error: 'Choose two different accounts' });
+    }
+    if (!Number.isFinite(transferAmount) || transferAmount <= 0 || Number(transferAmount.toFixed(2)) !== transferAmount) {
+      return res.status(400).json({ error: 'Transfer amount must be a positive value with at most two decimal places' });
+    }
+
+    const transaction = await sequelize.transaction(async (dbTransaction) => {
+      const fromAccount = await Account.findOne({
+        where: { id: fromAccountId, userId: req.userId },
+        transaction: dbTransaction,
+        lock: dbTransaction.LOCK.UPDATE
+      });
+
+      if (!fromAccount) {
+        const error = new Error('Source account not found');
+        error.status = 404;
+        throw error;
+      }
+
+      const toAccount = await Account.findOne({
+        where: { id: toAccountId, userId: req.userId },
+        transaction: dbTransaction,
+        lock: dbTransaction.LOCK.UPDATE
+      });
+      if (!toAccount) {
+        const error = new Error('Destination account not found');
+        error.status = 404;
+        throw error;
+      }
+      if (Number(fromAccount.balance) < transferAmount) {
+        const error = new Error('Insufficient balance');
+        error.status = 400;
+        throw error;
+      }
+
+      const createdTransaction = await Transaction.create({
+        fromAccountId,
+        toAccountId,
+        transactionType: 'transfer',
+        amount: transferAmount,
+        description,
+        status: 'completed',
+        referenceId: uuidv4()
+      }, { transaction: dbTransaction });
+
+      await fromAccount.decrement('balance', { by: transferAmount, transaction: dbTransaction });
+      await toAccount.increment('balance', { by: transferAmount, transaction: dbTransaction });
+      return createdTransaction;
     });
-
-    if (!fromAccount) {
-      return res.status(404).json({ error: 'Source account not found' });
-    }
-
-    if (parseFloat(fromAccount.balance) < parseFloat(amount)) {
-      return res.status(400).json({ error: 'Insufficient balance' });
-    }
-
-    const toAccount = await Account.findByPk(toAccountId);
-    if (!toAccount) {
-      return res.status(404).json({ error: 'Destination account not found' });
-    }
-
-    // Create transaction
-    const transaction = await Transaction.create({
-      fromAccountId,
-      toAccountId,
-      transactionType: 'transfer',
-      amount,
-      description,
-      status: 'completed',
-      referenceId: uuidv4()
-    });
-
-    // Update balances (double-entry bookkeeping)
-    await fromAccount.decrement('balance', { by: amount });
-    await toAccount.increment('balance', { by: amount });
 
     res.json({ 
       message: 'Transfer successful',
       transaction
     });
   } catch (error) {
-    res.status(500).json({ error: 'Transfer failed' });
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'Transfer failed' });
   }
 };
 

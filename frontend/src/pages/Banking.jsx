@@ -1,17 +1,36 @@
-import React, { useState } from 'react';
-import { useQuery } from 'react-query';
+import React, { useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from 'react-query';
 import { bankingService } from '../services';
 import toast from 'react-hot-toast';
 
 const Banking = () => {
   const [showCreateAccount, setShowCreateAccount] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [transactionSearch, setTransactionSearch] = useState('');
+  const [transactionType, setTransactionType] = useState('all');
+  const [transferAccounts, setTransferAccounts] = useState({ from: '', to: '' });
   
+  const queryClient = useQueryClient();
   const { data: accountsData, refetch } = useQuery('accounts', bankingService.getAccounts);
-  const { data: transactionsData } = useQuery('transactions', bankingService.getTransactions);
+  const { data: transactionsData, refetch: refetchTransactions } = useQuery('transactions', bankingService.getTransactions);
 
   const accounts = accountsData?.data?.accounts || [];
   const transactions = transactionsData?.data?.transactions || [];
+  const totalBalance = accounts.reduce((sum, account) => sum + Number(account.balance || 0), 0);
+  const ownedAccountIds = new Set(accounts.map((account) => account.id));
+  const filteredTransactions = useMemo(() => transactions.filter((tx) => {
+    const matchesType = transactionType === 'all' || tx.transactionType === transactionType;
+    const term = transactionSearch.trim().toLowerCase();
+    const matchesSearch = !term || `${tx.description || ''} ${tx.transactionType} ${tx.status}`.toLowerCase().includes(term);
+    return matchesType && matchesSearch;
+  }), [transactions, transactionSearch, transactionType]);
+
+  const refreshBankingData = () => {
+    refetch();
+    refetchTransactions();
+    queryClient.invalidateQueries('portfolio');
+    queryClient.invalidateQueries('portfolio-summary');
+  };
 
   const handleCreateAccount = async (e) => {
     e.preventDefault();
@@ -24,7 +43,7 @@ const Banking = () => {
       });
       toast.success('Account created successfully!');
       setShowCreateAccount(false);
-      refetch();
+      refreshBankingData();
     } catch (error) {
       toast.error('Failed to create account');
     }
@@ -35,15 +54,27 @@ const Banking = () => {
     const formData = new FormData(e.target);
     
     try {
+      const amount = Number(formData.get('amount'));
+      const fromAccountId = formData.get('fromAccount');
+      const toAccountId = formData.get('toAccount');
+      if (!Number.isFinite(amount) || amount <= 0) {
+        toast.error('Enter an amount greater than zero');
+        return;
+      }
+      if (!fromAccountId || !toAccountId || fromAccountId === toAccountId) {
+        toast.error('Choose two different accounts');
+        return;
+      }
       await bankingService.transferFunds({
-        fromAccountId: formData.get('fromAccount'),
-        toAccountId: formData.get('toAccount'),
-        amount: parseFloat(formData.get('amount')),
+        fromAccountId,
+        toAccountId,
+        amount,
         description: formData.get('description')
       });
       toast.success('Transfer completed successfully!');
       setShowTransfer(false);
-      refetch();
+      setTransferAccounts({ from: '', to: '' });
+      refreshBankingData();
     } catch (error) {
       toast.error(error.response?.data?.error || 'Transfer failed');
     }
@@ -70,6 +101,14 @@ const Banking = () => {
             Transfer Funds
           </button>
         </div>
+      </div>
+
+      <div className="card mb-6 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-sm text-gray-500">Combined account balance</p>
+          <p className="text-3xl font-bold text-indigo-600">${totalBalance.toFixed(2)}</p>
+        </div>
+        <p className="text-sm text-gray-500">{accounts.length} account{accounts.length === 1 ? '' : 's'} · Transfers are simulated</p>
       </div>
 
       {showCreateAccount && (
@@ -103,33 +142,48 @@ const Banking = () => {
           <form onSubmit={handleTransfer} className="space-y-4">
             <div>
               <label className="label">From Account</label>
-              <select name="fromAccount" className="input-field" required>
+              <select
+                name="fromAccount"
+                className="input-field"
+                value={transferAccounts.from}
+                onChange={(event) => setTransferAccounts((current) => ({ ...current, from: event.target.value }))}
+                required
+              >
+                <option value="">Select source account</option>
                 {accounts.map(acc => (
                   <option key={acc.id} value={acc.id}>
-                    {acc.accountNumber} - ${acc.balance}
+                    {acc.accountType} · {acc.accountNumber} · ${Number(acc.balance).toFixed(2)}
                   </option>
                 ))}
               </select>
             </div>
             <div>
               <label className="label">To Account</label>
-              <select name="toAccount" className="input-field" required>
+              <select
+                name="toAccount"
+                className="input-field"
+                value={transferAccounts.to}
+                onChange={(event) => setTransferAccounts((current) => ({ ...current, to: event.target.value }))}
+                required
+              >
+                <option value="">Select destination account</option>
                 {accounts.map(acc => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.accountNumber}
+                  <option key={acc.id} value={acc.id} disabled={acc.id === transferAccounts.from}>
+                    {acc.accountType} · {acc.accountNumber}
                   </option>
                 ))}
               </select>
             </div>
             <div>
               <label className="label">Amount</label>
-              <input type="number" name="amount" step="0.01" className="input-field" required />
+              <input type="number" name="amount" min="0.01" step="0.01" max={accounts.find((account) => account.id === transferAccounts.from)?.balance} className="input-field" required />
             </div>
             <div>
               <label className="label">Description</label>
               <input type="text" name="description" className="input-field" />
             </div>
-            <button type="submit" className="btn-primary">Transfer</button>
+            <button type="submit" className="btn-primary" disabled={accounts.length < 2}>Transfer</button>
+            {accounts.length < 2 && <p className="text-sm text-amber-700">Create another account before transferring between accounts.</p>}
           </form>
         </div>
       )}
@@ -163,25 +217,42 @@ const Banking = () => {
         </div>
 
         <div className="card">
-          <h3 className="text-lg font-semibold mb-4">Recent Transactions</h3>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <h3 className="text-lg font-semibold">Recent Transactions</h3>
+            <div className="flex gap-2">
+              <label className="sr-only" htmlFor="transaction-type-filter">Filter transaction type</label>
+              <select id="transaction-type-filter" className="px-3 py-2 border border-gray-300 rounded-lg text-sm" value={transactionType} onChange={(event) => setTransactionType(event.target.value)}>
+                <option value="all">All types</option>
+                <option value="transfer">Transfers</option>
+                <option value="stock_buy">Stock buys</option>
+                <option value="stock_sell">Stock sells</option>
+              </select>
+              <label className="sr-only" htmlFor="transaction-search">Search transactions</label>
+              <input id="transaction-search" className="px-3 py-2 border border-gray-300 rounded-lg text-sm min-w-0 w-36" placeholder="Search..." value={transactionSearch} onChange={(event) => setTransactionSearch(event.target.value)} />
+            </div>
+          </div>
           <div className="space-y-3 max-h-96 overflow-y-auto">
-            {transactions.map((tx) => (
+            {filteredTransactions.map((tx) => (
               <div key={tx.id} className="flex items-center justify-between py-3 border-b border-gray-100">
                 <div>
                   <p className="font-medium text-gray-800 capitalize">{tx.transactionType.replace('_', ' ')}</p>
                   <p className="text-sm text-gray-500">{new Date(tx.createdAt).toLocaleDateString()}</p>
                   {tx.description && <p className="text-xs text-gray-400">{tx.description}</p>}
                 </div>
-                <span className={`font-medium ${
-                  tx.status === 'completed' ? 'text-green-600' : 
-                  tx.status === 'failed' ? 'text-red-600' : 
-                  'text-yellow-600'
-                }`}>
-                  ${parseFloat(tx.amount).toFixed(2)}
-                </span>
+                <div className="text-right">
+                  <span className={`font-medium ${
+                    tx.status === 'completed' ? (tx.toAccountId && ownedAccountIds.has(tx.toAccountId) ? 'text-green-600' : 'text-gray-800') :
+                    tx.status === 'failed' ? 'text-red-600' :
+                    'text-yellow-600'
+                  }`}>
+                    {tx.transactionType === 'transfer' && tx.toAccountId && ownedAccountIds.has(tx.toAccountId) ? '+' : tx.fromAccountId && ownedAccountIds.has(tx.fromAccountId) ? '-' : ''}
+                    ${parseFloat(tx.amount).toFixed(2)}
+                  </span>
+                  {tx.status !== 'completed' && <p className="text-xs capitalize text-gray-500">{tx.status}</p>}
+                </div>
               </div>
             ))}
-            {transactions.length === 0 && (
+            {filteredTransactions.length === 0 && (
               <p className="text-gray-500 text-center py-8">No transactions yet</p>
             )}
           </div>
