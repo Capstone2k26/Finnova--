@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { useAuthStore } from '../stores/authStore';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -10,10 +9,20 @@ const api = axios.create({
   }
 });
 
+const getStoredToken = () => {
+  try {
+    const persistedAuth = JSON.parse(localStorage.getItem('finnova-auth') || 'null');
+    return persistedAuth?.state?.token || null;
+  } catch (error) {
+    console.error('Could not read the saved FINNOVA session:', error);
+    return null;
+  }
+};
+
 api.interceptors.request.use((config) => {
-  const auth = { token: useAuthStore.getState().token };
-  if (auth.token) {
-    config.headers.Authorization = `Bearer ${auth.state.token}`;
+  const token = getStoredToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
@@ -22,7 +31,7 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      useAuthStore.getState().logout();
+      localStorage.removeItem('finnova-auth');
       if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
         window.location.href = '/login';
       }
