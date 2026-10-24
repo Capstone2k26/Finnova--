@@ -13,7 +13,13 @@ const Trading = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const queryClient = useQueryClient();
   
-  const { data: stocksData, isLoading: stocksLoading, isError: stocksError } = useQuery('stocks', () => tradingService.getStocks());
+  const {
+    data: stocksData,
+    isLoading: stocksLoading,
+    isError: stocksFailed,
+    error: stocksError,
+    refetch: refetchStocks
+  } = useQuery('stocks', () => tradingService.getStocks());
   const { data: ordersData, isLoading: ordersLoading, isError: ordersError } = useQuery('orders', tradingService.getUserOrders);
   const { data: accountsData } = useQuery('accounts', bankingService.getAccounts);
   const { data: portfolioData } = useQuery('portfolio', portfolioService.getPortfolio);
@@ -108,7 +114,21 @@ const Trading = () => {
                 <input id="stock-search" className="px-3 py-2 border border-gray-300 rounded-lg text-sm min-w-0 w-40" placeholder="Symbol or company" value={stockSearch} onChange={(event) => setStockSearch(event.target.value)} />
               </div>
             </div>
-            {stocksError && <p role="alert" className="text-red-600 mb-3">Could not load stocks. Check the backend connection.</p>}
+            {stocksFailed && (
+              <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+                <p>
+                  {stocksError?.response?.status === 401
+                    ? 'Your session expired. Sign in again to view stocks.'
+                    : stocksError?.response
+                      ? `The stock service returned an error (${stocksError.response.status}). Try again.`
+                      : 'Could not reach the backend. Make sure it is running on port 5000.'}
+                </p>
+                <div className="flex gap-3">
+                  {stocksError?.response?.status === 401 && <a href="/login" className="font-semibold underline">Sign in</a>}
+                  <button type="button" onClick={() => refetchStocks()} className="font-semibold underline">Retry</button>
+                </div>
+              </div>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-50">
