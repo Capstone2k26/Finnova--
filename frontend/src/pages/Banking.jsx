@@ -9,10 +9,17 @@ const Banking = () => {
   const [transactionSearch, setTransactionSearch] = useState('');
   const [transactionType, setTransactionType] = useState('all');
   const [transferAccounts, setTransferAccounts] = useState({ from: '', to: '' });
+  const [selectedAccountId, setSelectedAccountId] = useState('');
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   
   const queryClient = useQueryClient();
-  const { data: accountsData, refetch } = useQuery('accounts', bankingService.getAccounts);
+  const { data: accountsData, refetch, isLoading: accountsLoading, isError: accountsError } = useQuery('accounts', bankingService.getAccounts);
   const { data: transactionsData, refetch: refetchTransactions } = useQuery('transactions', bankingService.getTransactions);
+  const { data: ledgerData, isLoading: ledgerLoading, isError: ledgerError } = useQuery(
+    ['account-ledger', selectedAccountId],
+    () => bankingService.getLedger(selectedAccountId),
+    { enabled: Boolean(selectedAccountId) }
+  );
 
   const accounts = accountsData?.data?.accounts || [];
   const transactions = transactionsData?.data?.transactions || [];
@@ -35,17 +42,23 @@ const Banking = () => {
   const handleCreateAccount = async (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
-    
+    setIsCreatingAccount(true);
     try {
-      await bankingService.createAccount({
+      const response = await bankingService.createAccount({
         accountType: formData.get('accountType'),
         isSimulation: formData.get('isSimulation') === 'true'
       });
-      toast.success('Account created successfully!');
+      const createdAccount = response.data.account;
+      toast.success(`${createdAccount.accountType} practice account created${createdAccount.isSimulation ? ' with $100,000 demo funds' : ''}.`);
       setShowCreateAccount(false);
-      refreshBankingData();
+      setSelectedAccountId(createdAccount.id);
+      await refreshBankingData();
     } catch (error) {
-      toast.error('Failed to create account');
+      const message = error.response?.data?.error
+        || (error.response ? `Account creation failed (${error.response.status}).` : 'Cannot reach the backend. Make sure it is running.');
+      toast.error(message);
+    } finally {
+      setIsCreatingAccount(false);
     }
   };
 
@@ -89,14 +102,15 @@ const Banking = () => {
         </div>
         <div className="space-x-3">
           <button 
-            onClick={() => setShowCreateAccount(!showCreateAccount)}
+            onClick={() => setShowCreateAccount((current) => !current)}
             className="btn-primary"
           >
-            New Account
+            Add Practice Account
           </button>
           <button 
-            onClick={() => setShowTransfer(!showTransfer)}
+            onClick={() => setShowTransfer((current) => !current)}
             className="btn-secondary"
+            disabled={accounts.length < 2}
           >
             Transfer Funds
           </button>
@@ -113,11 +127,12 @@ const Banking = () => {
 
       {showCreateAccount && (
         <div className="card mb-6">
-          <h3 className="text-lg font-semibold mb-4">Create New Account</h3>
+          <h3 className="text-lg font-semibold mb-1">Add a practice account</h3>
+          <p className="text-sm text-gray-500 mb-4">This simulator creates demo accounts only. Choose a funded account to begin practicing.</p>
           <form onSubmit={handleCreateAccount} className="space-y-4">
             <div>
-              <label className="label">Account Type</label>
-              <select name="accountType" className="input-field" required>
+              <label className="label" htmlFor="new-account-type">Account Type</label>
+              <select id="new-account-type" name="accountType" className="input-field" required>
                 <option value="savings">Savings</option>
                 <option value="checking">Checking</option>
                 <option value="investment">Investment</option>
@@ -125,13 +140,16 @@ const Banking = () => {
               </select>
             </div>
             <div>
-              <label className="label">Mode</label>
-              <select name="isSimulation" className="input-field" required>
-                <option value="false">Real Account</option>
-                <option value="true">Simulation Account</option>
+              <label className="label" htmlFor="new-account-mode">Practice balance</label>
+              <select id="new-account-mode" name="isSimulation" className="input-field" defaultValue="true" required>
+                <option value="true">Fund with $100,000 demo money</option>
+                <option value="false">Start with $0</option>
               </select>
             </div>
-            <button type="submit" className="btn-primary">Create Account</button>
+            <div className="flex gap-3">
+              <button type="submit" disabled={isCreatingAccount} className="btn-primary">{isCreatingAccount ? 'Creating...' : 'Create Practice Account'}</button>
+              <button type="button" className="btn-secondary" onClick={() => setShowCreateAccount(false)}>Cancel</button>
+            </div>
           </form>
         </div>
       )}
@@ -190,10 +208,14 @@ const Banking = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card">
-          <h3 className="text-lg font-semibold mb-4">Your Accounts</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold">Practice Accounts</h3>
+            <span className="text-sm text-gray-500">{accounts.length} total</span>
+          </div>
+          {accountsError && <p role="alert" className="text-red-600 mb-3">Could not load accounts. Check the backend connection.</p>}
           <div className="space-y-3">
             {accounts.map((account) => (
-              <div key={account.id} className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg">
+              <div key={account.id} className={`p-4 rounded-lg border ${selectedAccountId === account.id ? 'border-indigo-400 bg-indigo-50' : 'border-gray-100 bg-gray-50'}`}>
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-gray-600 capitalize">{account.accountType}</p>
@@ -204,16 +226,43 @@ const Banking = () => {
                       ${parseFloat(account.balance).toFixed(2)}
                     </p>
                     {account.isSimulation && (
-                      <span className="text-xs bg-yellow-200 text-yellow-800 px-2 py-1 rounded">Simulation</span>
+                      <span className="text-xs bg-lime-100 text-lime-800 px-2 py-1 rounded">Practice funds</span>
                     )}
                   </div>
                 </div>
+                <div className="flex justify-end mt-3">
+                  <button type="button" className="text-sm text-indigo-700 font-medium hover:underline" onClick={() => setSelectedAccountId(selectedAccountId === account.id ? '' : account.id)}>
+                    {selectedAccountId === account.id ? 'Hide account activity' : 'Manage / view activity'}
+                  </button>
+                </div>
               </div>
             ))}
+            {accountsLoading && <p className="text-gray-500 text-center py-6">Loading accounts...</p>}
             {accounts.length === 0 && (
               <p className="text-gray-500 text-center py-8">No accounts yet. Create your first account!</p>
             )}
           </div>
+          {selectedAccountId && (
+            <section className="mt-5 border-t pt-4" aria-live="polite">
+              <h4 className="font-semibold text-gray-800 mb-3">Account activity</h4>
+              {ledgerLoading && <p className="text-sm text-gray-500">Loading account ledger...</p>}
+              {ledgerError && <p role="alert" className="text-sm text-red-600">Could not load this account’s activity. Try selecting it again.</p>}
+              {!ledgerLoading && !ledgerError && (
+                <>
+                  <p className="text-sm text-gray-600 mb-2">{ledgerData?.data?.account?.accountNumber} · Current balance ${Number(ledgerData?.data?.account?.balance || 0).toFixed(2)}</p>
+                  <div className="max-h-52 overflow-y-auto">
+                    {(ledgerData?.data?.ledger || []).map((entry) => (
+                      <div key={entry.id} className="flex justify-between gap-3 border-b py-2 text-sm">
+                        <span className="text-gray-700 capitalize">{entry.transactionType.replaceAll('_', ' ')}{entry.description ? ` · ${entry.description}` : ''}</span>
+                        <span className="font-medium whitespace-nowrap">${Number(entry.amount).toFixed(2)}</span>
+                      </div>
+                    ))}
+                    {ledgerData?.data?.ledger?.length === 0 && <p className="text-sm text-gray-500 py-2">No activity on this account yet.</p>}
+                  </div>
+                </>
+              )}
+            </section>
+          )}
         </div>
 
         <div className="card">

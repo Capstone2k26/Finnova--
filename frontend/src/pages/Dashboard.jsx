@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from 'react-query';
 import { 
   BanknotesIcon, 
@@ -59,8 +60,19 @@ const Dashboard = () => {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-800">Dashboard</h1>
-        <p className="text-gray-600 mt-1">Welcome to your financial command center</p>
+        <section className="dashboard-hero rounded-3xl p-7 text-white sm:p-9">
+          <div className="relative z-10 max-w-2xl">
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-lime-200">Your money, your practice</p>
+            <h1 className="mt-3 text-3xl font-extrabold leading-tight sm:text-4xl">Build confidence with every decision.</h1>
+            <p className="mt-3 max-w-xl text-sm leading-relaxed text-emerald-50/70 sm:text-base">
+              Explore your practice accounts, learn financial basics, and try simulated investing in one workspace.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Link to="/banking" className="rounded-xl bg-lime-300 px-4 py-2.5 text-sm font-bold text-emerald-950 hover:bg-lime-200">Manage accounts</Link>
+              <Link to="/trading" className="rounded-xl border border-white/20 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/10">Explore demo market</Link>
+            </div>
+          </div>
+        </section>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">

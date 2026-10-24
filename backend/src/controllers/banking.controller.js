@@ -18,15 +18,17 @@ exports.getAccounts = async (req, res) => {
 exports.createAccount = async (req, res) => {
   try {
     const { accountType, isSimulation } = req.body;
-    
-    const accountNumber = `ACC${Date.now()}${Math.floor(Math.random() * 10000)}`;
-    
+    const validAccountTypes = ['savings', 'checking', 'investment', 'simulation'];
+    if (!validAccountTypes.includes(accountType)) {
+      return res.status(400).json({ error: 'Choose a valid account type' });
+    }
+
     const account = await Account.create({
       userId: req.userId,
       accountType,
-      accountNumber,
-      isSimulation: isSimulation || false,
-      balance: isSimulation ? 100000.00 : 0.00
+      accountNumber: `ACC-${uuidv4()}`,
+      isSimulation: Boolean(isSimulation) || accountType === 'simulation',
+      balance: Boolean(isSimulation) || accountType === 'simulation' ? 100000.00 : 0.00
     });
 
     res.status(201).json({ 
@@ -34,7 +36,8 @@ exports.createAccount = async (req, res) => {
       account 
     });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to create account' });
+    console.error('Create account error:', error);
+    res.status(500).json({ error: 'Could not create account. Please check the database connection and try again.' });
   }
 };
 
